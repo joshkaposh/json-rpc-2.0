@@ -32,7 +32,7 @@ This repo is configured to be built with Docker, and Docker compose. To build al
 
 ```
 # Install dependencies
-yarn install
+npm install
 
 # Create a network, which allows containers to communicate
 # with each other, by using their container name as a hostname
