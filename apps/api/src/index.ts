@@ -3,7 +3,8 @@ import { log } from "@repo/logger";
 
 
 const HOST = "localhost"
-const PORT = process.env.PORT ?? 6969;
+// const PORT = process.env.PORT ?? 6969;
+const PORT = 6969;
 // const DB = "https://silverflowca-risen-risen-stage-21944072.dev.odoo.com/jsonrpc"
 const DB = 'silverflowca-risen-risen-stage-21944072';
 const USER = "Josh Dulisse"

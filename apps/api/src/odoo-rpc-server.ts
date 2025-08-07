@@ -1,5 +1,6 @@
 import type { CreateID, JSONRPCResponse } from 'json-rpc-2.0';
-import { construct_rpc, rpc, Server, type ServerConfig } from './rpc-server';
+import { Server, type ServerConfig } from './rpc-server';
+import { log } from '@repo/logger';
 
 // /**
 //  * Odoo JSON-RPC requests each have a "params" Object
@@ -94,6 +95,7 @@ interface OdooServerConfig<Methods extends RPC.MethodRecord = RPC.MethodRecord, 
 }
 
 type OdooMethods<M extends RPC.MethodRecord> = M & {
+    authenticate(params: { args: OdooRpcAuthArgs }): PromiseLike<JSONRPCResponse | null>;
     /**
      * create record(s) on a model.
      */
@@ -124,19 +126,20 @@ export class Odoo<Methods extends RPC.MethodRecord, AdvancedMethods extends RPC.
 }> {
     #server: Server<OdooContext, OdooMethods<Methods>, AdvancedMethods, OdooParams>;
     constructor(config: OdooServerConfig<Methods, AdvancedMethods, OdooParams>) {
-        const { host, rpcMethods: configMethods = {}, rpcAdvancedMethods: configAdvancedMethods = {}, rpcMiddleware: configMiddleware = [] } = config;
+        const { host, port, rpcMethods: configMethods = {}, rpcAdvancedMethods: configAdvancedMethods = {}, rpcMiddleware: configMiddleware = [] } = config;
 
         this.#server = new Server<OdooContext, OdooMethods<Methods>, AdvancedMethods, OdooParams>({
             host: host,
+            port: port,
             rpcMethods: {
                 ...configMethods as OdooMethods<Methods>,
+                authenticate: ({ args }) => this.#authenticate(args),
                 create: ({ args }) => this.#rpc(args),
                 search_read: ({ args }) => this.#rpc(args),
                 update: ({ args }) => this.#rpc(args),
                 delete: ({ args }) => this.#rpc(args),
             },
             rpcAdvancedMethods: {
-                authenticate: (request: RPC.Request<{ args: OdooRpcAuthArgs }>) => this.#authenticate(request),
                 ...configAdvancedMethods as OdooMethods<AdvancedMethods>
             },
             rpcMiddleware: [...configMiddleware]
@@ -145,7 +148,8 @@ export class Odoo<Methods extends RPC.MethodRecord, AdvancedMethods extends RPC.
         const ctx = this.#server.context;
         ctx.credentials = config.credentials;
         ctx.db = config.db;
-        ctx.auth_uri = `https://${config.db}/web/session/authenticate`;
+        ctx.auth_uri = `https://${config.db}/jsonrpc`;
+        log(`Auth uri: ${ctx.auth_uri}`)
     }
 
     listen(callback?: () => void) {
@@ -162,24 +166,39 @@ export class Odoo<Methods extends RPC.MethodRecord, AdvancedMethods extends RPC.
         return this.#server.rpc('call', {
             service: 'object',
             method: 'execute',
-            args
+            args,
+            id: this.#server.nextId()
         });
     }
+
 
     // "silverflowca-risen-risen-stage-21944072",       // DB name
     //   2,                                               // user ID (e.g. your user ID)
     //   "a753ee99287123cd1754058ae894f00a7094cee9",      // API key
 
-    async #authenticate(request: RPC.Request<{ args: OdooRpcAuthArgs }>) {
+    async #authenticate(args: OdooRpcAuthArgs) {
         const ctx = this.#server.context;
-        const args = request.params.args;
-        return rpc(
-            ctx.auth_uri,
-            construct_rpc('call', { args }, this.#server.nextId()),
-            'call', {
-            args
-        },
-            this.#server.nextId()
-        );
+        // const args = request.params.args;
+        log(`Odoo auth_uri: ${JSON.stringify(ctx.auth_uri)}`)
+        // log(`Odoo authenticate: ${JSON.stringify(request)}`)
+        return this.#server.rpc('call', {
+            service: 'common',
+            method: 'authenticate',
+            args: args,
+            id: this.#server.nextId(),
+        })
+        // return this.#server.rpc(ctx.auth_uri, 'common', 'authenticate', args)
+
+        // return rpc(
+        //     ctx.auth_uri,
+        //     construct_rpc('call', {
+        //         method: ""
+        //         args
+        //     }, this.#server.nextId()),
+        //     'call', {
+        //     args
+        // },
+        //     this.#server.nextId()
+        // );
     }
 }

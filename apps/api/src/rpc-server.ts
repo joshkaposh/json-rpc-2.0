@@ -1,6 +1,7 @@
 import type { Express } from 'express';
 import { JSONRPCServer, type TypedJSONRPCServer, type JSONRPCServerMiddleware, CreateID, JSONRPCID, JSONRPCRequest, isJSONRPCRequest, JSONRPCResponsePromise } from 'json-rpc-2.0';
 import { createServer } from './server';
+import { log } from '@repo/logger';
 
 
 export function createID() {
@@ -81,10 +82,16 @@ export class Server<
 
     constructor(config: ServerConfig<RpcMethods, RpcAdvancedMethods, RpcParams> = {}) {
         const app = createServer();
-        app.post('/json-rpc', (req, res) => {
+        const server: TypedJSONRPCServer<RpcMethods, RpcParams> = new JSONRPCServer();
+        this.#addConfigListeners(server, config)
+
+        app.post('/jsonrpc', (req, res) => {
             const jsonRpcRequest = req.body;
+            log(`Request: ${JSON.stringify(req.body)}`);
+
             server.receive(jsonRpcRequest).then(jsonRpcResponse => {
                 if (jsonRpcResponse) {
+                    log(`Response: ${JSON.stringify(jsonRpcResponse)}`)
                     res.json(jsonRpcResponse);
                 } else {
                     // If the response is absent, it was JSON-RPC notification.
@@ -94,13 +101,9 @@ export class Server<
             });
         });
 
-        const server: TypedJSONRPCServer<RpcMethods, RpcParams> = new JSONRPCServer();
-
-        this.#addConfigListeners(server, config)
-
         const HOST = config.host ?? 'localhost',
             PORT = config.port ?? 3000,
-            url = `https://${HOST}:${PORT}/` as const;
+            url = `http://${HOST}:${PORT}/` as const;
 
         const meta = {
             host: HOST,
@@ -160,11 +163,21 @@ export class Server<
      * It can also receive an array of requests, in which case it may return an array of responses.
      * Alternatively, you can use `server.receiveJSON`, which takes JSON string as is (in this case req.body).
      */
-    rpc(method: string, params: RpcParams, id: JSONRPCID = this.#nextId()) {
+    rpc(rpcMethod: string, { service, method, args, id = this.#nextId() }: {
+        service: string;
+        method: string;
+        args: any[];
+        id: JSONRPCID;
+    }) {
+        log(`Creating RPC Request: ${{ service, method, args }}`)
         return this.#rpc.receive({
             "jsonrpc": "2.0",
-            "method": method,
-            "params": params,
+            "method": rpcMethod,
+            "params": {
+                service,
+                method,
+                args
+            },
             "id": id,
         });
     }
