@@ -1,13 +1,12 @@
 "use client";
 
-import { useEffect, useState, FormEvent, useContext } from "react";
-import { RpcClientContext } from "./context";
+import { useState, FormEvent } from "react";
+// import { RpcClientContext } from "./context";
 import { isJSONRPCRequest, JSONRPCID, JSONRPCRequest, JSONRPCResponse, JSONRPCResponsePromise } from "json-rpc-2.0";
-import { log } from '@repo/logger'
+// import { log } from '@repo/logger'
 
-const API_HOST = process.env.NEXT_PUBLIC_API_HOST || "http://localhost:6969";
-
-const API_RPC = `${API_HOST}/jsonrpc`;
+// const API_HOST = process.env.NEXT_PUBLIC_API_HOST || "http://localhost:6969";
+// const API_RPC = `${API_HOST}/jsonrpc`;
 
 
 function createID() {
