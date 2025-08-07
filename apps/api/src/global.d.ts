@@ -135,6 +135,13 @@ declare global {
         export type AdvancedMethodRecord = Record<string, (request: RpcRequest) => PromiseLike<RpcResponse>>;
         export type Middleware<ServerParams = void> = (request: RpcRequest, serverParams: ServerParams) => JSONRPCResponsePromise;
 
+        export interface Request<Params extends Record<string, any> = Record<string, any>> extends Required<JSONRPCRequest> {
+            params: Params;
+        }
+
+        export interface Response<Params extends Record<string, any> = Record<string, any>> extends Required<JSONRPCResponse> {
+            params: Params;
+        }
 
         export interface HttpServerConfig {
             /** 
