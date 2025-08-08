@@ -15,10 +15,10 @@
   },
   "dependencies": {
     "@repo/logger": "*",
+    "@repo/rpc-api": "*",
     "body-parser": "^1.20.2",
     "cors": "^2.8.5",
     "express": "^4.18.3",
-    "json-rpc-2.0": "^1.7.1",
     "morgan": "^1.10.0"
   },
   "devDependencies": {

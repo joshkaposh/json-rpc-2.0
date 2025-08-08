@@ -1,0 +1,20 @@
+{
+    "extends": "@repo/typescript-config/server.json",
+    "include": [
+        "."
+    ],
+    "exclude": [
+        "dist",
+        "build",
+        "node_modules"
+    ],
+    "compilerOptions": {
+        "module": "esnext",
+        "moduleResolution": "bundler",
+        "lib": [
+            "ESNext"
+        ],
+        "outDir": "./dist",
+        "rootDir": "./src"
+    }
+}

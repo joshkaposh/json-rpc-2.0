@@ -1,16 +1,17 @@
-import type { CreateID, JSONRPCResponse } from 'json-rpc-2.0';
-import { Server, type ServerConfig } from './rpc-server';
 import { log } from '@repo/logger';
+import type { RPC } from '@repo/rpc-api/types';
+import type { AdvancedMethods, AuthenticatedParams, Context, CreateArgs, DeleteArgs, FieldsGetArgs, LoginParams, Methods, Params, ReadArgs, SearchArgs, SearchReadArgs, UpdateArgs } from '@repo/rpc-api/odoo';
+import { SERVER_REQUESTS } from '@repo/rpc-api/odoo';
+import { Server, type ServerConfig } from '@repo/rpc-api';
 
-// /**
 //  * Odoo JSON-RPC requests each have a "params" Object
 //  * with the following properties:
-//  * 
-//  * "service" - the Odoo service (e.g "object", "common").  
-//  * 
-//  * "method" - the Odoo method to invoke (e.g "execute_kw").  
-//  * 
-//  * "args" - The structure of `args` is as follows:  
+//  *
+//  * "service" - the Odoo service (e.g "object", "common").
+//  *
+//  * "method" - the Odoo method to invoke (e.g "execute_kw").
+//  *
+//  * "args" - The structure of `args` is as follows:
 //  * [
 //  * `<positional>`,
 //  *  `<domain filters>`,
@@ -21,184 +22,46 @@ import { log } from '@repo/logger';
 //  * order?: string
 //  * }`
 //  * ]
-//  *
-//  * this is an array with positional elements
-//  * that MUST match the expected order that the Odoo JSON-RPC method expects.
-//  * 
-//  * 
-//  * Most calls require `<domain filter>`, which at the minimum MUST be an empty array.
-//  * 
-//  * Use the last position of the array for options (e.g "limit", "offset" for pagination).
-//  */
-// type OdooArgs = (string | number)[] | [Json.Object] | [...(string | number)[], [string, string, string][], {
-//     fields?: string[];
-//     limit?: number;
-//     offset?: number;
-//     order?: string;
-// }];
-
-type OdooSearchOptions = {
-    fields: string[];
-    limit?: number;
-    offset?: number;
-} | string[];
-
-type OdooDomainFilter = [ident: string, op: string, equals: Json.Primitive][] | [[]];
-
-type OdooAuthenticatedCall<T extends string = string> = [db: string, uid: number, key: string, model_name: string, method: T];
-
-// type Args<Method extends 'create' | 'search_read' | 'write' | 'unlink'> = [...Json.Primitive[], model: string, method: Method];
-
-type OdooCreateArgs = [...OdooAuthenticatedCall<'create'>, Record<string, Json.Primitive>];
-type OdooSearchArgs = [...OdooAuthenticatedCall<'search_read'>, domain_filter: OdooDomainFilter, options: OdooSearchOptions];
-type OdooUpdateArgs = [...OdooAuthenticatedCall<'write'>, any[], Record<string, Json.Primitive>];
-type OdooDeleteArgs = [...OdooAuthenticatedCall<'unlink'>, any[]];
-
-type OdooRpcArgs = OdooCreateArgs | OdooSearchArgs | OdooUpdateArgs | OdooDeleteArgs;
-type OdooRpcAuthArgs = [database: string, username: string, password: string];
-
-type OdooRpcParams = {
-    service: 'object';
-    method: 'execute';
-    args: OdooRpcArgs;
-}
-
-type OdooRpcAuthParams = {
-    service: 'common';
-    method: 'authenticate';
-    args: OdooRpcAuthArgs;
-}
-
-// interface OdooRequest extends JSONRPCRequest {
-//     id: number;
-//     method: 'call';
-//     params: OdooRpcParams;
-// }
-
-// interface OdooAuthRequest extends JSONRPCRequest {
-//     id: number;
-//     method: 'call';
-//     params: OdooRpcAuthParams;
-// }
 
 interface OdooServerConfig<Methods extends RPC.MethodRecord = RPC.MethodRecord, AdvancedMethods extends RPC.AdvancedMethodRecord = RPC.AdvancedMethodRecord, Params = void> extends ServerConfig<Methods, AdvancedMethods, Params> {
-    /**
-     * the Odoo instance url (e.g https://your_odoo_instance_url/ **without** the protocol or trailing `/`).
-     */
     db: string;
-    nextId?: CreateID
-
-    credentials?: {
-        login: string;
-        password: string;
-    }
 }
 
-type OdooMethods<M extends RPC.MethodRecord> = M & {
-    authenticate(params: { args: OdooRpcAuthArgs }): PromiseLike<JSONRPCResponse | null>;
-    /**
-     * create record(s) on a model.
-     */
-    create(params: { args: OdooCreateArgs }): PromiseLike<JSONRPCResponse | null>;
 
-    /**
-     * fetch record(s) from a model.
-     */
-    search_read(params: { args: OdooSearchArgs }): PromiseLike<JSONRPCResponse | null>;
+type RpcServer = Server<Context, Methods, AdvancedMethods, Params>;
 
-    /**
-     * update record(s) on a model.
-     */
-    update(params: { args: OdooUpdateArgs }): PromiseLike<JSONRPCResponse | null>;
+export class OdooServer {
+    #server: RpcServer;
+    #context: Context;
+    constructor(config: OdooServerConfig<Methods, AdvancedMethods, Params>) {
+        const { host, port, rpcMiddleware: configMiddleware = [] } = config;
 
-    /**
-     * delete a record on a model.
-     */
-    delete(params: { args: OdooDeleteArgs }): PromiseLike<JSONRPCResponse | null>;
-}
-type OdooParams = OdooRpcParams | OdooRpcAuthParams;
-
-type OdooContext = Pick<OdooServerConfig, 'credentials' | 'db'> & {
-    auth_uri: string;
-};
-
-export class Odoo<Methods extends RPC.MethodRecord, AdvancedMethods extends RPC.AdvancedMethodRecord & {
-}> {
-    #server: Server<OdooContext, OdooMethods<Methods>, AdvancedMethods, OdooParams>;
-    constructor(config: OdooServerConfig<Methods, AdvancedMethods, OdooParams>) {
-        const { host, port, rpcMethods: configMethods = {}, rpcAdvancedMethods: configAdvancedMethods = {}, rpcMiddleware: configMiddleware = [] } = config;
-
-        this.#server = new Server<OdooContext, OdooMethods<Methods>, AdvancedMethods, OdooParams>({
+        this.#server = new Server({
             host: host,
             port: port,
-            rpcMethods: {
-                ...configMethods as OdooMethods<Methods>,
-                authenticate: ({ args }) => this.#authenticate(args),
-                create: ({ args }) => this.#rpc(args),
-                search_read: ({ args }) => this.#rpc(args),
-                update: ({ args }) => this.#rpc(args),
-                delete: ({ args }) => this.#rpc(args),
-            },
             rpcAdvancedMethods: {
-                ...configAdvancedMethods as OdooMethods<AdvancedMethods>
+                authenticate: (request: RPC.Request<'authenticate', LoginParams>) => SERVER_REQUESTS.authenticate(this.#context.url, request.params, request.id),
+                create: (request: RPC.Request<'create', AuthenticatedParams<CreateArgs>>) => SERVER_REQUESTS.create(this.#context.url, request.params, request.id),
+                read: (request: RPC.Request<'read', AuthenticatedParams<ReadArgs>>) => SERVER_REQUESTS.read(this.#context.url, request.params, request.id),
+                search: (request: RPC.Request<'search', AuthenticatedParams<SearchArgs>>) => SERVER_REQUESTS.search(this.#context.url, request.params, request.id),
+                search_read: (request: RPC.Request<'search_read', AuthenticatedParams<SearchReadArgs>>) => SERVER_REQUESTS.search_read(this.#context.url, request.params, request.id),
+                update: (request: RPC.Request<'update', AuthenticatedParams<UpdateArgs>>) => SERVER_REQUESTS.update(this.#context.url, request.params, request.id),
+                delete: (request: RPC.Request<'delete', AuthenticatedParams<DeleteArgs>>) => SERVER_REQUESTS.delete(this.#context.url, request.params, request.id),
+                fields_get: (request: RPC.Request<'fields_get', AuthenticatedParams<FieldsGetArgs>>) => SERVER_REQUESTS.fields_get(this.#context.url, request.params, request.id),
+
             },
             rpcMiddleware: [...configMiddleware]
         });
 
-        const ctx = this.#server.context;
-        ctx.credentials = config.credentials;
-        ctx.db = config.db;
-        ctx.auth_uri = `https://${config.db}/jsonrpc`;
-        log(`Auth uri: ${ctx.auth_uri}`)
+        this.#context = this.#server.setContext({
+            db: config.db,
+            url: `https://${config.db}.dev.odoo.com/jsonrpc`
+        });
+
+        log(`Odoo endpoint = ${this.#context.url}`)
     }
 
     listen(callback?: () => void) {
-        // const credentials = this.#server.context.credentials as Record<string, string>;
-        // if (credentials) {
-        //     const { db, login, password } = credentials;
-        //     await this.#authenticate([db, login, password]).then(console.log);
-        // }
-
         this.#server.listen(callback);
-    }
-
-    #rpc(args: OdooRpcArgs) {
-        return this.#server.rpc('call', {
-            service: 'object',
-            method: 'execute',
-            args,
-            id: this.#server.nextId()
-        });
-    }
-
-
-    // "silverflowca-risen-risen-stage-21944072",       // DB name
-    //   2,                                               // user ID (e.g. your user ID)
-    //   "a753ee99287123cd1754058ae894f00a7094cee9",      // API key
-
-    async #authenticate(args: OdooRpcAuthArgs) {
-        const ctx = this.#server.context;
-        // const args = request.params.args;
-        log(`Odoo auth_uri: ${JSON.stringify(ctx.auth_uri)}`)
-        // log(`Odoo authenticate: ${JSON.stringify(request)}`)
-        return this.#server.rpc('call', {
-            service: 'common',
-            method: 'authenticate',
-            args: args,
-            id: this.#server.nextId(),
-        })
-        // return this.#server.rpc(ctx.auth_uri, 'common', 'authenticate', args)
-
-        // return rpc(
-        //     ctx.auth_uri,
-        //     construct_rpc('call', {
-        //         method: ""
-        //         args
-        //     }, this.#server.nextId()),
-        //     'call', {
-        //     args
-        // },
-        //     this.#server.nextId()
-        // );
     }
 }

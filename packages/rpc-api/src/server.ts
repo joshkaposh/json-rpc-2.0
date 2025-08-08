@@ -1,26 +1,23 @@
-import type { Express } from 'express';
-import { JSONRPCServer, type TypedJSONRPCServer, type JSONRPCServerMiddleware, CreateID, JSONRPCID, JSONRPCRequest, isJSONRPCRequest, JSONRPCResponsePromise } from 'json-rpc-2.0';
-import { createServer } from './server';
+import { type Express } from 'express';
+import { JSONRPCServer, TypedJSONRPCServer, type CreateID } from "json-rpc-2.0";
 import { log } from '@repo/logger';
+import type { RPC } from "./types";
+import { createID } from './helpers';
+import { createServer } from './http-server';
 
+export * from './helpers';
 
-export function createID() {
-    const gen = (function* _() {
-        let id = 0;
-        while (true) {
-            id++;
-            yield id;
-        }
-    })();
-
-    return () => gen.next().value;
-}
+// export function rpc(url: string | URL | globalThis.Request, request: RPC.Request, ...args: Parameters<typeof construct_rpc>) {
+//     return !isJSONRPCRequest(request) ? reject('Parse error') : fetch(url, construct_rpc(...args)).then(res => res.json()) as RPC.ResponsePromise;
+// }
 
 export interface ServerConfig<
     M extends RPC.MethodRecord = RPC.MethodRecord,
     A extends RPC.AdvancedMethodRecord = RPC.AdvancedMethodRecord,
     P extends any = void
-> extends RPC.HttpServerConfig {
+> {
+    host: string;
+    port: number;
 
     nextId?: CreateID;
     /**
@@ -44,33 +41,16 @@ export interface ServerConfig<
      * 
      * **Middleware will be called in the order provided.**
      */
-    rpcMiddleware?: JSONRPCServerMiddleware<P>[];
-}
-
-export function reject(message?: string, options?: ErrorOptions) {
-    return Promise.reject(new Error(message, options))
-}
-
-export function construct_rpc<M extends string, Params extends Record<string, any>>(method: M, params: Params, id: JSONRPCID) {
-    return {
-        "jsonrpc": "2.0",
-        "method": method,
-        "params": params,
-        "id": id,
-    } as Required<JSONRPCRequest>;
-}
-
-export function rpc(url: string | URL | globalThis.Request, request: JSONRPCRequest, ...args: Parameters<typeof construct_rpc>) {
-    return !isJSONRPCRequest(request) ? reject('Parse error') : fetch(url, construct_rpc(...args)).then(res => res.json()) as JSONRPCResponsePromise;
+    rpcMiddleware?: RPC.Middleware<P>[];
 }
 
 export class Server<
     Context extends Record<PropertyKey, unknown>,
-    RpcMethods extends RPC.MethodRecord = RPC.MethodRecord,
-    RpcAdvancedMethods extends RPC.AdvancedMethodRecord = RPC.AdvancedMethodRecord,
-    RpcParams = void,
+    Methods extends RPC.MethodRecord = RPC.MethodRecord,
+    AdvancedMethods extends RPC.AdvancedMethodRecord = RPC.AdvancedMethodRecord,
+    Params = void,
 > {
-    #rpc: TypedJSONRPCServer<RpcMethods & RpcAdvancedMethods, RpcParams>;
+    #rpc: TypedJSONRPCServer<Methods & AdvancedMethods, Params>;
     #app: Express;
     #meta: {
         host: string;
@@ -80,14 +60,15 @@ export class Server<
     }
     #nextId: CreateID;
 
-    constructor(config: ServerConfig<RpcMethods, RpcAdvancedMethods, RpcParams> = {}) {
+    constructor(config: ServerConfig<Methods, AdvancedMethods, Params>) {
         const app = createServer();
-        const server: TypedJSONRPCServer<RpcMethods, RpcParams> = new JSONRPCServer();
+        const server: TypedJSONRPCServer<Methods & AdvancedMethods, Params> = new JSONRPCServer();
+
         this.#addConfigListeners(server, config)
 
         app.post('/jsonrpc', (req, res) => {
             const jsonRpcRequest = req.body;
-            log(`Request: ${JSON.stringify(req.body)}`);
+            log(`Incoming Request: ${JSON.stringify(req.body)}`);
 
             server.receive(jsonRpcRequest).then(jsonRpcResponse => {
                 if (jsonRpcResponse) {
@@ -118,11 +99,21 @@ export class Server<
         this.#nextId = config.nextId ?? createID();
     }
 
+    setContext(context: Context) {
+        const ctx = this.#meta.context;
+        for (const key in context) {
+            if (Object.prototype.hasOwnProperty.call(context, key)) {
+                ctx[key] = context[key];
+            }
+        }
+        return ctx;
+    }
+
     get context() {
         return this.#meta.context;
     }
 
-    nextId(): JSONRPCID {
+    nextId(): RPC.Id {
         return this.#nextId();
     }
 
@@ -150,11 +141,9 @@ export class Server<
      * 
      * **Middleware(s) are applied in the order they are provided**.
      */
-    addMiddleware(...middleware: JSONRPCServerMiddleware<RpcParams>[] | readonly JSONRPCServerMiddleware<RpcParams>[]) {
+    addMiddleware(...middleware: RPC.Middleware<Params>[]) {
         this.#rpc.applyMiddleware(...middleware);
     }
-
-
 
     /**
      * Calls `JSONRPCServer.receive`.
@@ -163,13 +152,12 @@ export class Server<
      * It can also receive an array of requests, in which case it may return an array of responses.
      * Alternatively, you can use `server.receiveJSON`, which takes JSON string as is (in this case req.body).
      */
-    rpc(rpcMethod: string, { service, method, args, id = this.#nextId() }: {
+    receive(rpcMethod: string, { service, method, args, id = this.#nextId() }: {
         service: string;
         method: string;
         args: any[];
-        id: JSONRPCID;
+        id: RPC.Id;
     }) {
-        log(`Creating RPC Request: ${{ service, method, args }}`)
         return this.#rpc.receive({
             "jsonrpc": "2.0",
             "method": rpcMethod,
@@ -182,23 +170,22 @@ export class Server<
         });
     }
 
-    rpcFromJson(json: string) {
+    receiveJson(json: string) {
         return this.#rpc.receiveJSON(json);
     }
 
     /**
      * Adds the json rpc methods, advanced methods, and middleware
      */
-    #addConfigListeners(server: RPC.Server<RpcMethods, RpcAdvancedMethods, RpcParams>, config: ServerConfig<RpcMethods, RpcAdvancedMethods, RpcParams>) {
+    #addConfigListeners(server: any, config: ServerConfig<Methods, AdvancedMethods, Params>) {
         // add rpc methods
         const { rpcMethods, rpcAdvancedMethods, rpcMiddleware } = config;
 
-        type Keys = Extract<keyof RpcMethods, string>;
-        for (const [methodName, method] of Object.entries(rpcMethods ?? []) as [Keys, RpcMethods[Keys]][]) {
+        for (const [methodName, method] of Object.entries(rpcMethods ?? [])) {
             server.addMethod(methodName, method);
         }
 
-        for (const [methodName, method] of Object.entries(rpcAdvancedMethods ?? []) as [Keys, RpcMethods[Keys]][]) {
+        for (const [methodName, method] of Object.entries(rpcAdvancedMethods ?? [])) {
             server.addMethodAdvanced(methodName, method);
         }
 
